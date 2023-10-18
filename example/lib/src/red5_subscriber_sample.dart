@@ -15,51 +15,90 @@ class Red5SubscriberSample extends StatefulWidget {
 }
 
 class _Red5SubscriberSampleState extends State<Red5SubscriberSample> {
-  RTCPeerConnection? _pc2;
+  RTCPeerConnection? _localPeer;
   RTCDataChannel? _dc2;
-  String _dc2Status = '';
+  String _localPeerDataChannel = '';
   final List<String> logs = [];
   WebSocket? _signalingSocket;
   String? streamToken;
   String selfId = '1234567';
   bool _inCalling = false;
   String streamName = 'f9ce13e5-1224-493b-a1a2-051cd1a443fc';
+  RTCVideoRenderer rtcVideoRenderer = RTCVideoRenderer();
 
   @override
   void initState() {
     super.initState();
+    rtcVideoRenderer.initialize();
     // _signalingSocket =
     //TODO Get StreamToken
   }
 
-  void _makeCall() async {
-    if (_pc2 != null) return;
+  @override
+  void dispose() {
+    rtcVideoRenderer.dispose();
+    _signalingSocket?.close();
+    _localPeer?.close();
+    super.dispose();
+  }
+
+  Future<void> _initializePeerConnection() async {
+    if (_localPeer != null) return;
     logs.add('MakeCall()');
     try {
-      _pc2 = await createPeerConnection({'iceServers': []});
-
-      _pc2!.onIceCandidate = (candidate) {
+      _localPeer = await createPeerConnection({
+        'iceServers': [
+          {'url': 'stun:stun.l.google.com:19302'},
+        ],
+      });
+      _localPeer!.onAddStream = (mediaStream) {
+        print('OnAddStream: ${mediaStream.id}');
+        rtcVideoRenderer.srcObject = mediaStream;
+        setState(() {});
+      };
+      _localPeer!.onAddTrack = (stream, track) {
+        print('OnAddTrack\nStream:${stream.id}\nTrack: ${track.label}');
+        rtcVideoRenderer.srcObject = stream;
+        setState(() {});
+      };
+      _localPeer!.onIceCandidate = (candidate) {
         logs.add('pc2: onIceCandidate: ${candidate.candidate}');
         print('pc2: onIceCandidate: ${candidate.candidate}');
         _sendCandidate(candidate);
       };
 
-      _pc2!.onDataChannel = (channel) {
+      _localPeer!.onDataChannel = (channel) {
         _dc2 = channel;
         _dc2!.onDataChannelState = (state) {
           setState(() {
-            _dc2Status += '\ndc2: state: ${state.toString()}';
+            _localPeerDataChannel += '\ndc2: state: ${state.toString()}';
             logs.add('dc2: state: ${state.toString()}');
           });
         };
         _dc2!.onMessage = (data) {
           setState(() {
-            _dc2Status += '\ndc2: Received message: ${data.text}';
+            _localPeerDataChannel += '\ndc2: Received message: ${data.text}';
             logs.add('dc2: Received message: ${data.text}');
           });
-          _dc2!.send(
-              RTCDataChannelMessage('(dc2 ==> dc1) Hello from dc2 echo !!!'));
         };
+      };
+      _localPeer!.onConnectionState = (state) {
+        print('ConnectionState: $state');
+      };
+      _localPeer!.onIceGatheringState = (state) {
+        print('IceGatheringState: $state');
+        if (state == RTCIceGatheringState.RTCIceGatheringStateComplete) {
+          _sendCandidate(null);
+        }
+      };
+      _localPeer!.onIceConnectionState = (state) {
+        print('IceConnectionState: $state');
+      };
+      _localPeer!.onSignalingState = (state) {
+        print('SignalingState: $state');
+      };
+      _localPeer!.onRenegotiationNeeded = () {
+        print('RenegotiationNeeded');
       };
     } catch (e) {
       print(e.toString());
@@ -76,8 +115,8 @@ class _Red5SubscriberSampleState extends State<Red5SubscriberSample> {
     logs.add('HangUp()');
     try {
       await _dc2?.close();
-      await _pc2?.close();
-      _pc2 = null;
+      await _localPeer?.close();
+      _localPeer = null;
     } catch (e) {
       logs.add('HangUp() Error');
       print(e.toString());
@@ -88,7 +127,7 @@ class _Red5SubscriberSampleState extends State<Red5SubscriberSample> {
 
     Timer(const Duration(seconds: 1), () {
       setState(() {
-        _dc2Status = '';
+        _localPeerDataChannel = '';
       });
     });
   }
@@ -97,7 +136,7 @@ class _Red5SubscriberSampleState extends State<Red5SubscriberSample> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Data Channel Test'),
+        title: Text('Red5 Subscription Test'),
         actions: [
           IconButton(
             onPressed: () {
@@ -114,10 +153,7 @@ class _Red5SubscriberSampleState extends State<Red5SubscriberSample> {
               child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text('\n\n(callee)DataChannel:\n'),
-              Container(
-                child: Text(_dc2Status),
-              ),
+              Expanded(child: RTCVideoView(rtcVideoRenderer)),
             ],
           ));
         },
@@ -180,9 +216,9 @@ class _Red5SubscriberSampleState extends State<Red5SubscriberSample> {
   }
 
   _onSocketMessage(dynamic rawMessage) {
-    final Map message = jsonDecode(rawMessage);
     print('SocketMessage Received: $rawMessage');
     logs.add('SocketMessage: $rawMessage');
+    final Map message = jsonDecode(rawMessage);
     Map? messageData = message['data'];
     final String? rawMessageType = messageData?['type'];
     final Red5SignalingMessageType? messageDataType;
@@ -197,13 +233,13 @@ class _Red5SubscriberSampleState extends State<Red5SubscriberSample> {
         messageDataType = Red5SignalingMessageType.error;
         break;
       default:
-        if (message?["isAvailable"] == true) {
+        if (message['isAvailable'] == true) {
           messageDataType = Red5SignalingMessageType.streamAvailable;
-        } else if (message['sdp']?['type'] == 'offer') {
+        } else if (messageData?['sdp']?['type'] == 'offer') {
           messageDataType = Red5SignalingMessageType.sdpOffer;
         } else if (message['type'] == 'metadata') {
           messageDataType = Red5SignalingMessageType.metadata;
-        } else if (messageData?['status'] == "NetStream.Play.UnpublishNotify") {
+        } else if (messageData?['status'] == 'NetStream.Play.UnpublishNotify') {
           messageDataType = Red5SignalingMessageType.unpublishNotify;
         } else {
           messageDataType = null;
@@ -211,26 +247,39 @@ class _Red5SubscriberSampleState extends State<Red5SubscriberSample> {
     }
     switch (messageDataType) {
       case Red5SignalingMessageType.status:
-        if (messageData!["code"] == "NetConnection.Connect.Success") {
+        if (messageData!['code'] == 'NetConnection.Connect.Success') {
           _requestStreamAvailability();
         }
-        if (messageData["code"] == "NetConnection.Connect.Failed") {}
-        break;
-      case Red5SignalingMessageType.candidate:
-        // TODO: Handle this case.
-        break;
-      case Red5SignalingMessageType.error:
-        // TODO: Handle this case.
+        if (messageData['code'] == 'NetConnection.Connect.Failed') {}
+        if (messageData['code'] == 'NetConnection.ICE.TrickleCompleted') {
+          subscribe();
+        }
+        if (messageData['code'] == 'NetConnection.DataChannel.Available') {
+          // _switchDataChannel(dataChannelLabel: data["description"]);
+        }
         break;
       case Red5SignalingMessageType.streamAvailable:
         _requestOffer();
+        break;
+      case Red5SignalingMessageType.sdpOffer:
+        final sdp = RTCSessionDescription(messageData!['sdp']['sdp'], 'offer');
+        onOffer(sdp);
+        break;
+      case Red5SignalingMessageType.candidate:
+        final candidate = RTCIceCandidate(
+          messageData!['candidate']['candidate'],
+          messageData['candidate']['sdpMid'],
+          messageData['candidate']['sdpMLineIndex'],
+        );
+        onCandidateMessage(candidate);
+        break;
+      case Red5SignalingMessageType.error:
+        // TODO: Handle this case.
         break;
       case Red5SignalingMessageType.metadata:
         break;
       case Red5SignalingMessageType.unpublishNotify:
         break;
-      case Red5SignalingMessageType.sdpOffer:
-      // TODO: Handle this case.
       case null:
       // TODO: Handle this case.
     }
@@ -238,55 +287,71 @@ class _Red5SubscriberSampleState extends State<Red5SubscriberSample> {
 
   void _requestOffer() {
     _send({
-      "requestOffer": streamName,
-      "requestId": 'subscriber-$selfId',
-      "transport": "udp",
-      "datachannel": true,
-      "doNotSwitch": false
+      'requestOffer': streamName,
+      'requestId': 'subscriber-$selfId',
+      'transport': 'udp',
+      'datachannel': true,
+      'doNotSwitch': false
     });
   }
 
-  _onSocketDone() {
+  void _onSocketDone() {
     debugPrint(
         'Closed by server [${_signalingSocket!.closeCode} => ${_signalingSocket!.closeReason}]!');
     //DATACHANNEL: Instance of 'RTCDataChannelNative' message: {"data":{"status":"NetStream.Play.UnpublishNotify"}}
   }
 
-  _sendCandidate(RTCIceCandidate candidate) {
+  _sendCandidate(RTCIceCandidate? candidate) {
+    if (candidate?.candidate?.isEmpty ?? true) {
+      _send({
+        'handleCandidate': streamName,
+        'data': {
+          'candidate': {'type': 'candidate', 'candidate': ''}
+        },
+      });
+    } else {
+      _send({
+        'handleCandidate': streamName,
+        'requestId': 'subscriber-$selfId',
+        'data': {
+          'candidate': {
+            'sdpMLineIndex': candidate?.sdpMLineIndex,
+            'sdpMid': candidate?.sdpMid,
+            'candidate': candidate?.candidate,
+          }
+        }
+      });
+    }
+  }
+
+  Future<void> onOffer(RTCSessionDescription offer) async {
+    await _initializePeerConnection();
+    await _localPeer!.setRemoteDescription(offer);
+    final localDescription = await _localPeer!.createAnswer();
+    await _localPeer!.setLocalDescription(localDescription);
+    sendAwnswerSdp(localDescription);
+  }
+
+  Future<void> onCandidateMessage(RTCIceCandidate iceCandidate) async {
+    if (_localPeer == null) return;
+    await _localPeer!.addCandidate(iceCandidate);
+  }
+
+  void sendAwnswerSdp(RTCSessionDescription sdp) {
     _send({
-      'handleCandidate': streamName,
+      'handleAnswer': streamName,
       'requestId': 'subscriber-$selfId',
       'data': {
-        'candidate': {
-          'sdpMLineIndex': candidate.sdpMLineIndex,
-          'sdpMid': candidate.sdpMid,
-          'candidate': candidate.candidate,
-        }
-      }
+        'sdp': {'sdp': sdp.sdp, 'type': sdp.type}
+      },
     });
   }
 
-  onOffer() {
-    // print('pc1 offer: ${offer.sdp}');
-    // logs.add('pc1 offer: ${offer.sdp}');
-    //
-    // await _pc2
-    // !.setRemoteDescription(offer);
-    // var answer = await _pc2!.createAnswer();
-    // print('pc2 answer: ${answer.sdp}');
-    // logs.add('pc2 answer: ${answer.sdp}');
-    //
-    // await _pc2!.setLocalDescription(answer);
+  void subscribe() {
+    _send({'subscribe': streamName, 'requestId': 'subscriber-$selfId'});
   }
 
-  subscribe() {
-    // _sendRaw({
-    //   "subscribe": r5configuration.streamName,
-    //   "requestId": 'subscriber-$selfId'
-    // });
-  }
-
-  getStreamToken() async {
+  Future<void> getStreamToken() async {
     const ppvServerUrl = 'https://ppv-dev.daleapp.com.br/dev';
     print('Fetching StreamToken');
     logs.add('Fetching StreamToken');
@@ -302,7 +367,7 @@ class _Red5SubscriberSampleState extends State<Red5SubscriberSample> {
   }
 
   void _requestStreamAvailability() {
-    _send({"isAvailable": streamName});
+    _send({'isAvailable': streamName});
   }
 }
 
