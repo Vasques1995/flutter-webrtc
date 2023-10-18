@@ -19,8 +19,10 @@ class _DataChannelLoopBackSampleState extends State<DataChannelLoopBackSample> {
   RTCDataChannel? _dc2;
   String _dc1Status = '';
   String _dc2Status = '';
+  final List<String> logs = [];
 
   bool _inCalling = false;
+
   @override
   void initState() {
     super.initState();
@@ -28,17 +30,19 @@ class _DataChannelLoopBackSampleState extends State<DataChannelLoopBackSample> {
 
   void _makeCall() async {
     if (_pc1 != null || _pc2 != null) return;
-
+    logs.add('MakeCall()');
     try {
       _pc1 = await createPeerConnection({'iceServers': []});
       _pc2 = await createPeerConnection({'iceServers': []});
 
       _pc1!.onIceCandidate = (candidate) {
+        logs.add('pc1: onIceCandidate: ${candidate.candidate}');
         print('pc1: onIceCandidate: ${candidate.candidate}');
         _pc2!.addCandidate(candidate);
       };
 
       _pc2!.onIceCandidate = (candidate) {
+        logs.add('pc2: onIceCandidate: ${candidate.candidate}');
         print('pc2: onIceCandidate: ${candidate.candidate}');
         _pc1!.addCandidate(candidate);
       };
@@ -51,11 +55,13 @@ class _DataChannelLoopBackSampleState extends State<DataChannelLoopBackSample> {
         _dc2!.onDataChannelState = (state) {
           setState(() {
             _dc2Status += '\ndc2: state: ${state.toString()}';
+            logs.add('dc2: state: ${state.toString()}');
           });
         };
         _dc2!.onMessage = (data) {
           setState(() {
             _dc2Status += '\ndc2: Received message: ${data.text}';
+            logs.add('dc2: Received message: ${data.text}');
           });
           _dc2!.send(
               RTCDataChannelMessage('(dc2 ==> dc1) Hello from dc2 echo !!!'));
@@ -65,6 +71,7 @@ class _DataChannelLoopBackSampleState extends State<DataChannelLoopBackSample> {
       _dc1!.onDataChannelState = (state) {
         setState(() {
           _dc1Status += '\ndc1: state: ${state.toString()}';
+          logs.add('dc1: state: ${state.toString()}');
         });
         if (state == RTCDataChannelState.RTCDataChannelOpen) {
           _dc1!.send(RTCDataChannelMessage('(dc1 ==> dc2) Hello from dc1 !!!'));
@@ -73,14 +80,17 @@ class _DataChannelLoopBackSampleState extends State<DataChannelLoopBackSample> {
 
       _dc1!.onMessage = (data) => setState(() {
             _dc1Status += '\ndc1: Received message: ${data.text}';
+            logs.add('dc1: Received message: ${data.text}');
           });
 
       var offer = await _pc1!.createOffer({});
       print('pc1 offer: ${offer.sdp}');
+      logs.add('pc1 offer: ${offer.sdp}');
 
       await _pc2!.setRemoteDescription(offer);
       var answer = await _pc2!.createAnswer();
       print('pc2 answer: ${answer.sdp}');
+      logs.add('pc2 answer: ${answer.sdp}');
 
       await _pc1!.setLocalDescription(offer);
       await _pc2!.setLocalDescription(answer);
@@ -88,6 +98,7 @@ class _DataChannelLoopBackSampleState extends State<DataChannelLoopBackSample> {
       await _pc1!.setRemoteDescription(answer);
     } catch (e) {
       print(e.toString());
+      logs.add('MakeCall() Error: $e');
     }
     if (!mounted) return;
 
@@ -97,10 +108,12 @@ class _DataChannelLoopBackSampleState extends State<DataChannelLoopBackSample> {
   }
 
   void _hangUp() async {
+    logs.add('HangUp()');
     try {
       await _dc1?.close();
       setState(() {
         _dc1Status += '\n _dc1.close()';
+        logs.add('_dc1 close()');
       });
       await _dc2?.close();
       await _pc1?.close();
@@ -108,6 +121,7 @@ class _DataChannelLoopBackSampleState extends State<DataChannelLoopBackSample> {
       _pc1 = null;
       _pc2 = null;
     } catch (e) {
+      logs.add('HangUp() Error');
       print(e.toString());
     }
     setState(() {
@@ -127,6 +141,14 @@ class _DataChannelLoopBackSampleState extends State<DataChannelLoopBackSample> {
     return Scaffold(
       appBar: AppBar(
         title: Text('Data Channel Test'),
+        actions: [
+          IconButton(
+            onPressed: () {
+              showAboutDialog(context: context, children: [Text(logs.join('\n'))]);
+            },
+            icon: Icon(Icons.analytics),
+          ),
+        ],
       ),
       body: OrientationBuilder(
         builder: (context, orientation) {

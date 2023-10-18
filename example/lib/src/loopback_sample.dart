@@ -19,7 +19,9 @@ class _MyAppState extends State<LoopBackSample> {
   bool _inCalling = false;
   Timer? _timer;
   final List<RTCRtpSender> _senders = [];
+
   String get sdpSemantics => 'unified-plan';
+  final List<String> logs = [];
 
   @override
   void initState() {
@@ -73,60 +75,72 @@ class _MyAppState extends State<LoopBackSample> {
   }
 
   void _onSignalingState(RTCSignalingState state) {
+    logs.add('Signaling State: ${state.name}');
     print(state);
   }
 
   void _onIceGatheringState(RTCIceGatheringState state) {
+    logs.add('IceGathering State: ${state.name}');
     print(state);
   }
 
   void _onIceConnectionState(RTCIceConnectionState state) {
+    logs.add('IceConnection State: ${state.name}');
     print(state);
   }
 
   void _onPeerConnectionState(RTCPeerConnectionState state) {
+    logs.add('PeerConnection State: ${state.name}');
     print(state);
   }
 
   void _onAddStream(MediaStream stream) {
     print('New stream: ' + stream.id);
+    logs.add('New stream: ${stream.id}');
     _remoteRenderer.srcObject = stream;
   }
 
   void _onRemoveStream(MediaStream stream) {
+    logs.add('Removing Stream: ${stream.id}');
     _remoteRenderer.srcObject = null;
   }
 
   void _onCandidate(RTCIceCandidate candidate) {
     print('onCandidate: ${candidate.candidate}');
+    logs.add('OnCandidate: ${candidate.candidate}');
     _peerConnection?.addCandidate(candidate);
   }
 
   void _onTrack(RTCTrackEvent event) {
     print('onTrack');
+    logs.add('onTrack: ${event.track.kind}');
     if (event.track.kind == 'video') {
       _remoteRenderer.srcObject = event.streams[0];
     }
   }
 
   void _onAddTrack(MediaStream stream, MediaStreamTrack track) {
+    logs.add('OnAddTrack: ${track.kind}');
     if (track.kind == 'video') {
       _remoteRenderer.srcObject = stream;
     }
   }
 
   void _onRemoveTrack(MediaStream stream, MediaStreamTrack track) {
+    logs.add('OnRemoveTrack: ${track.kind}');
     if (track.kind == 'video') {
       _remoteRenderer.srcObject = null;
     }
   }
 
   void _onRenegotiationNeeded() {
+    logs.add('RenegotiationNeeded');
     print('RenegotiationNeeded');
   }
 
   // Platform messages are asynchronous, so we initialize in an async method.
   void _makeCall() async {
+    logs.add('MakeCall()');
     final mediaConstraints = <String, dynamic>{
       'audio': true,
       'video': {
@@ -240,7 +254,7 @@ class _MyAppState extends State<LoopBackSample> {
               ),
             ],
           ));
-      
+
       await _peerConnection.addTransceiver(
           kind: RTCRtpMediaType.RTCRtpMediaTypeVideo);
       await _peerConnection.addTransceiver(
@@ -253,6 +267,7 @@ class _MyAppState extends State<LoopBackSample> {
       var description = await _peerConnection!.createOffer(offerSdpConstraints);
       var sdp = description.sdp;
       print('sdp = $sdp');
+      logs.add('sdp: $sdp');
       await _peerConnection!.setLocalDescription(description);
       //change for loopback.
       var sdp_answer = sdp?.replaceAll('setup:actpass', 'setup:active');
@@ -267,11 +282,12 @@ class _MyAppState extends State<LoopBackSample> {
       // do re-negotiation ....
       */
     } catch (e) {
+      logs.add('MakeCall() Error: $e');
       print(e.toString());
     }
     if (!mounted) return;
 
-    _timer = Timer.periodic(Duration(seconds: 1), handleStatsReport);
+    // _timer = Timer.periodic(Duration(seconds: 1), handleStatsReport);
 
     setState(() {
       _inCalling = true;
@@ -279,6 +295,7 @@ class _MyAppState extends State<LoopBackSample> {
   }
 
   void _hangUp() async {
+    logs.add('HangUp()');
     try {
       await _localStream?.dispose();
       await _peerConnection?.close();
@@ -286,6 +303,7 @@ class _MyAppState extends State<LoopBackSample> {
       _localRenderer.srcObject = null;
       _remoteRenderer.srcObject = null;
     } catch (e) {
+      logs.add('HangUp Error: $e');
       print(e.toString());
     }
     setState(() {
@@ -295,6 +313,7 @@ class _MyAppState extends State<LoopBackSample> {
   }
 
   void _sendDtmf() async {
+    logs.add('SendDTMF()');
     var rtpSender =
         _senders.firstWhere((element) => element.track?.kind == 'audio');
     var dtmfSender = rtpSender.dtmfSender;
@@ -314,14 +333,20 @@ class _MyAppState extends State<LoopBackSample> {
     return Scaffold(
       appBar: AppBar(
         title: Text('LoopBack example'),
-        actions: _inCalling
-            ? <Widget>[
-                IconButton(
-                  icon: Icon(Icons.keyboard),
-                  onPressed: _sendDtmf,
-                ),
-              ]
-            : null,
+        actions: [
+          IconButton(
+            onPressed: () {
+              showAboutDialog(
+                  context: context, children: [Text(logs.join('\n'))]);
+            },
+            icon: Icon(Icons.analytics),
+          ),
+          if (_inCalling)
+            IconButton(
+              icon: Icon(Icons.keyboard),
+              onPressed: _sendDtmf,
+            ),
+        ],
       ),
       body: OrientationBuilder(
         builder: (context, orientation) {
