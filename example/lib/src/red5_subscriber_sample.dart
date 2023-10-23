@@ -86,7 +86,8 @@ class _Red5SubscriberSampleState extends State<Red5SubscriberSample> {
         print('ConnectionState: $state');
       };
       _localPeer!.onIceGatheringState = (state) {
-        print('IceGatheringState: $state');
+        final now = DateTime.now();
+        print('${now.toLocal()} IceGatheringState: $state');
         if (state == RTCIceGatheringState.RTCIceGatheringStateComplete) {
           _sendCandidate(null);
         }
@@ -267,7 +268,7 @@ class _Red5SubscriberSampleState extends State<Red5SubscriberSample> {
         break;
       case Red5SignalingMessageType.candidate:
         final candidate = RTCIceCandidate(
-          messageData!['candidate']['candidate'],
+          messageData!['candidate']['candidate'], //.replaceAll('prflx', 'host')
           messageData['candidate']['sdpMid'],
           messageData['candidate']['sdpMLineIndex'],
         );
@@ -329,15 +330,23 @@ class _Red5SubscriberSampleState extends State<Red5SubscriberSample> {
     await _localPeer!.setRemoteDescription(offer);
     final localDescription = await _localPeer!.createAnswer();
     await _localPeer!.setLocalDescription(localDescription);
-    sendAwnswerSdp(localDescription);
+    sendAnswerSdp(localDescription);
   }
 
   Future<void> onCandidateMessage(RTCIceCandidate iceCandidate) async {
     if (_localPeer == null) return;
-    await _localPeer!.addCandidate(iceCandidate);
+    try {
+      var now = DateTime.now();
+      print('${now.toLocal()} localPeer.addCandidate()');
+      await _localPeer!.addCandidate(iceCandidate);
+      now = DateTime.now();
+      print('${now.toLocal()} CANDIDATO ADICIONADO');
+    } catch (error) {
+      print('Erro: $error');
+    }
   }
 
-  void sendAwnswerSdp(RTCSessionDescription sdp) {
+  void sendAnswerSdp(RTCSessionDescription sdp) {
     _send({
       'handleAnswer': streamName,
       'requestId': 'subscriber-$selfId',

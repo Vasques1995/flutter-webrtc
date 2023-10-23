@@ -15,8 +15,12 @@ dependencies:
   http: ^1.1.0
   flutter_webrtc:
     path: ../
-  # Required for MediaRecorder example
-  path_provider: ^2.0.2
+  flutter_webrtc_tizen:
+    git:
+      url: https://github.com/Vasques1995/flutter-tizen-webrtc.git
+      ref: 69bc989 # commit hash  # Required for MediaRecorder example
+  path_provider: ^2.0.7
+  path_provider_tizen: ^2.0.2
 
 dev_dependencies:
   flutter_test:
